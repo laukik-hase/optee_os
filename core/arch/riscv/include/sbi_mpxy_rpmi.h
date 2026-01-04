@@ -199,6 +199,12 @@ sbi_mpxy_rpmi_init_send_without_response(struct sbi_mpxy_rpmi_message *message,
 void sbi_mpxy_rpmi_probe_channels(void);
 int sbi_mpxy_rpmi_read_attributes(struct sbi_mpxy_rpmi_channel *channel);
 int sbi_mpxy_rpmi_send_data(struct sbi_mpxy_rpmi_channel *channel, void *data);
+void thread_return_to_udomain_by_sbi_mpxy(unsigned long arg0,
+					  unsigned long arg1,
+					  unsigned long arg2,
+					  unsigned long arg3,
+					  unsigned long arg4,
+					  unsigned long arg5 __unused);
 
 #endif /*__ASSEMBLER__*/
 
