@@ -19,6 +19,13 @@
 #include <types_ext.h>
 #include <util.h>
 
+/** Message Header Size in bytes */
+#define RPMI_MSG_HDR_SIZE		(8)
+/** Data field size in bytes */
+#define RPMI_MSG_DATA_SIZE(__slot_size) ((__slot_size) - RPMI_MSG_HDR_SIZE)
+/** Minimum slot size in bytes */
+#define RPMI_SLOT_SIZE_MIN		(128)
+
 /* RPMI message protocol specific MPXY attributes */
 enum sbi_mpxy_rpmi_attribute_id {
 	SBI_MPXY_RPMI_ATTR_SERVICEGROUP_ID = SBI_MPXY_ATTR_MSGPROTO_ATTR_START,
@@ -103,6 +110,37 @@ struct sbi_mpxy_rpmi_context {
 
 /* Forward declaration of the RPMI context */
 extern struct sbi_mpxy_rpmi_context *sbi_mpxy_rpmi_ctx;
+
+/* RPMI Request Forward ServiceGroup Definitions */
+struct rpmi_reqfwd_retrieve_current_message_req {
+	uint32_t start_index;
+};
+
+struct rpmi_reqfwd_retrieve_current_message_resp {
+	int32_t status;
+	uint32_t remaining;
+	uint32_t returned;
+	/* remaining space need to be adjusted for the above 3 u32's */
+	uint8_t request_message[RPMI_MSG_DATA_SIZE(RPMI_SLOT_SIZE_MIN) -
+				(sizeof(uint32_t) * 3)];
+};
+
+struct rpmi_reqfwd_complete_current_message_req {
+	uint8_t response_data[RPMI_MSG_DATA_SIZE(RPMI_SLOT_SIZE_MIN)];
+};
+
+struct rpmi_reqfwd_complete_current_message_resp {
+	int32_t status;
+	uint32_t num_messages;
+};
+
+/** RPMI Request Forward ServiceGroup Service IDs */
+enum rpmi_reqfwd_service_id {
+	RPMI_REQFWD_SRV_ENABLE_NOTIFICATION = 0x01,
+	RPMI_REQFWD_SRV_RETRIEVE_CURRENT_MESSAGE = 0x02,
+	RPMI_REQFWD_SRV_COMPLETE_CURRENT_MESSAGE = 0x03,
+	RPMI_REQFWD_SRV_MAX_COUNT,
+};
 
 /** RPMI/MPXY message helper routines */
 
