@@ -3,6 +3,9 @@
  * Copyright (c) 2025 NXP
  */
 
+#include <kernel/misc.h>
+#include <kernel/panic.h>
+#include <kernel/thread_private.h>
 #include <riscv.h>
 #include <rpmi.h>
 #include <sbi.h>
@@ -10,6 +13,9 @@
 #include <sbi_mpxy_rpmi.h>
 #include <stdlib.h>
 #include <string.h>
+#include <tee/optee_abi.h>
+#include <tee/teeabi_opteed.h>
+#include <tee/teeabi_opteed_macros.h>
 
 struct sbi_mpxy_rpmi_context *sbi_mpxy_rpmi_ctx;
 
@@ -253,4 +259,182 @@ int sbi_mpxy_rpmi_send_data(struct sbi_mpxy_rpmi_channel *channel, void *data)
 	message->error = ret;
 
 	return RPMI_SUCCESS;
+}
+
+/**
+ * @brief Retrieves the channel ID for the Request Forwarding service group.
+ *
+ * This function searches for the channel ID associated with the Request
+ * Forwarding service group for a given hart ID.
+ *
+ * @param hartid The hart ID for which to retrieve the channel ID.
+ * @param channel_id Pointer to store the retrieved channel ID.
+ *
+ * @return 0 on success, or -1 if the channel is not found.
+ */
+static int rpmi_get_reqfwd_channel_id_by_hartid(uint32_t hartid,
+						uint32_t *channel_id)
+{
+	struct sbi_mpxy_rpmi_channel *channel = NULL;
+	uint32_t i = 0;
+
+	if (!sbi_mpxy_rpmi_ctx)
+		return -1;
+
+	for (i = 0; i < sbi_mpxy_rpmi_ctx->channel_count; i++) {
+		channel = &sbi_mpxy_rpmi_ctx->channels[i];
+		if (channel->rpmi_attrs.servicegroup_id !=
+		    RPMI_SRVGRP_REQUEST_FORWARD) {
+			continue;
+		}
+		if (channel->hart_id == hartid) {
+			*channel_id = channel->channel_id;
+			return 0;
+		}
+	}
+
+	return -1;
+}
+
+/* Called with all exception being masked */
+static void
+thread_sbi_mpxy_reqfwd_retrieve_message(struct thread_abi_args *args)
+{
+	struct rpmi_reqfwd_retrieve_current_message_req req;
+	struct rpmi_reqfwd_retrieve_current_message_resp resp;
+	uint32_t hartid = 0, channel_id = 0;
+	unsigned long ack_len;
+	int rc;
+
+	hartid = thread_get_hartid();
+
+	rc = rpmi_get_reqfwd_channel_id_by_hartid(hartid, &channel_id);
+	if (rc) {
+		EMSG("Failed to get reqfwd channel id for hart %d", hartid);
+		panic();
+	}
+
+	req.start_index = 0;
+	rc = sbi_mpxy_send_message_with_response(channel_id,
+			RPMI_REQFWD_SRV_RETRIEVE_CURRENT_MESSAGE,
+			&req, sizeof(req), &resp, sizeof(resp),
+			&ack_len);
+
+	if (rc != SBI_SUCCESS || !ack_len)
+		panic("SBI ReqFwd retrieve message returns error");
+
+	memcpy(args, resp.request_message, sizeof(*args));
+}
+
+/* Called with all exception being masked */
+static void
+thread_sbi_mpxy_reqfwd_complete_message(struct thread_abi_args *args)
+{
+	struct rpmi_reqfwd_complete_current_message_resp resp = { };
+	uint32_t hartid = 0, channel_id = 0;
+	unsigned long ack_len;
+	int rc;
+
+	hartid = thread_get_hartid();
+
+	rc = rpmi_get_reqfwd_channel_id_by_hartid(hartid, &channel_id);
+	if (rc) {
+		EMSG("Failed to get reqfwd channel id for hart %d", hartid);
+		panic();
+	}
+
+	rc = sbi_mpxy_send_message_with_response(channel_id,
+			RPMI_REQFWD_SRV_COMPLETE_CURRENT_MESSAGE,
+			args, sizeof(unsigned long) * 5,
+			&resp, sizeof(resp),
+			&ack_len);
+
+	if (rc != SBI_SUCCESS || resp.status != RPMI_SUCCESS)
+		panic("SBI ReqFwd complete message returns error");
+}
+
+#define ABI_ENTRY_TYPE_FAST		1
+#define ABI_ENTRY_TYPE_YIELD		0
+#define FUNCID_TYPE_SHIFT		31
+#define FUNCID_TYPE_MASK		0x1
+#define GET_ABI_ENTRY_TYPE(id)		(((id) >> FUNCID_TYPE_SHIFT) & \
+					 FUNCID_TYPE_MASK)
+
+static void thread_handle_request(struct thread_abi_args *args)
+{
+	uint32_t funcid_type;
+	int rc;
+
+	// DMSG("Sent from host domain: "
+	//      "args->a0=0x%08lX, args->a1=0x%08lX, args->a2=0x%08lX "
+	//      "args->a3=0x%08lX, args->a4=0x%08lX, args->a5=0x%08lX",
+	//      args->a0, args->a1, args->a2, args->a3, args->a4, args->a5);
+
+	funcid_type = GET_ABI_ENTRY_TYPE(args->a0);
+	if (funcid_type == ABI_ENTRY_TYPE_YIELD) {
+		rc = thread_handle_std_abi(args->a0, args->a1, args->a2,
+					   args->a3, args->a4, args->a5,
+					   args->a6, args->a7);
+
+		/*
+		 * Normally thread_handle_std_abi() should return via
+		 * thread_rpc(), but if thread_handle_std_abi() hasn't switched
+		 * stack (error detected) it will do a normal "C" return.
+		 */
+		/* Restore thread_handle_std_abi() return value */
+		args->a1 = rc;
+		args->a2 = 0;
+		args->a3 = 0;
+		args->a4 = 0;
+		args->a5 = 0;
+		args->a0 = TEEABI_OPTEED_RETURN_CALL_DONE;
+	} else if (funcid_type == ABI_ENTRY_TYPE_FAST) {
+		thread_handle_fast_abi(args);
+		args->a5 = args->a4;
+		args->a4 = args->a3;
+		args->a3 = args->a2;
+		args->a2 = args->a1;
+		args->a1 = args->a0;
+		args->a0 = TEEABI_OPTEED_RETURN_CALL_DONE;
+	}
+
+	// DMSG("Send to host domain: "
+	//      "args->a0=0x%08lX, args->a1=0x%08lX, args->a2=0x%08lX "
+	//      "args->a3=0x%08lX, args->a4=0x%08lX, args->a5=0x%08lX",
+	//      args->a0, args->a1, args->a2, args->a3, args->a4, args->a5);
+}
+
+void __noreturn
+thread_return_to_udomain_by_sbi_mpxy(unsigned long arg0,
+				     unsigned long arg1,
+				     unsigned long arg2,
+				     unsigned long arg3,
+				     unsigned long arg4,
+				     unsigned long arg5 __unused)
+{
+	struct thread_abi_args args = { .a0 = arg0, .a1 = arg1, .a2 = arg2,
+					.a3 = arg3, .a4 = arg4 };
+
+	assert((thread_get_exceptions() & THREAD_EXCP_ALL) == THREAD_EXCP_ALL);
+
+	/*
+	 * Complete message except the following two cases:
+	 *  - a0 = TEEABI_OPTEED_RETURN_ENTRY_DONE
+	 *  - a0 = TEEABI_OPTEED_RETURN_ON_DONE
+	 * These two cases happen in boot time when OP-TEE finishes boot time
+	 * initialization. There are no message to be handled so we don't need
+	 * to complete message.
+	 */
+	if (arg0 == TEEABI_OPTEED_RETURN_ENTRY_DONE ||
+	    arg0 == TEEABI_OPTEED_RETURN_ON_DONE)
+	    goto msg_loop;
+
+	thread_sbi_mpxy_reqfwd_complete_message(&args);
+
+msg_loop:
+	while (1) {
+		thread_sbi_mpxy_reqfwd_retrieve_message(&args);
+		thread_handle_request(&args);
+		thread_sbi_mpxy_reqfwd_complete_message(&args);
+	}
 }
