@@ -351,9 +351,11 @@ thread_sbi_mpxy_reqfwd_retrieve_message(struct thread_abi_args *args)
 static void
 thread_sbi_mpxy_reqfwd_complete_message(struct thread_abi_args *args)
 {
+	struct rpmi_reqfwd_complete_current_message_req req = { };
 	struct rpmi_reqfwd_complete_current_message_resp resp = { };
 	uint32_t hartid = 0, channel_id = 0;
 	unsigned long ack_len;
+	const uint32_t response_size = sizeof(unsigned long) * 5;
 	int rc;
 
 	hartid = thread_get_hartid();
@@ -364,9 +366,11 @@ thread_sbi_mpxy_reqfwd_complete_message(struct thread_abi_args *args)
 		panic();
 	}
 
+	memcpy(req.response_data, args, response_size);
+
 	rc = sbi_mpxy_send_message_with_response(channel_id,
 			RPMI_REQFWD_SRV_COMPLETE_CURRENT_MESSAGE,
-			args, sizeof(unsigned long) * 5,
+			&req, response_size,
 			&resp, sizeof(resp),
 			&ack_len);
 
