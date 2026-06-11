@@ -304,6 +304,9 @@ thread_sbi_mpxy_reqfwd_retrieve_message(struct thread_abi_args *args)
 	struct rpmi_reqfwd_retrieve_current_message_resp resp;
 	uint32_t hartid = 0, channel_id = 0;
 	unsigned long ack_len;
+	uint8_t *dest = (uint8_t *)args;
+	uint32_t total_received = 0;
+	const uint32_t expected_size = sizeof(*args);
 	int rc;
 
 	hartid = thread_get_hartid();
@@ -314,16 +317,34 @@ thread_sbi_mpxy_reqfwd_retrieve_message(struct thread_abi_args *args)
 		panic();
 	}
 
-	req.start_index = 0;
-	rc = sbi_mpxy_send_message_with_response(channel_id,
-			RPMI_REQFWD_SRV_RETRIEVE_CURRENT_MESSAGE,
-			&req, sizeof(req), &resp, sizeof(resp),
-			&ack_len);
+	do {
+		req.start_index = total_received;
 
-	if (rc != SBI_SUCCESS || !ack_len)
-		panic("SBI ReqFwd retrieve message returns error");
+		rc = sbi_mpxy_send_message_with_response(channel_id,
+				RPMI_REQFWD_SRV_RETRIEVE_CURRENT_MESSAGE,
+				&req, sizeof(req), &resp, sizeof(resp),
+				&ack_len);
 
-	memcpy(args, resp.request_message, sizeof(*args));
+		if (rc != SBI_SUCCESS || !ack_len) {
+			EMSG("SBI ReqFwd retrieve message failed: rc=%d, ack_len=%lu",
+			     rc, ack_len);
+			panic("SBI ReqFwd retrieve message returns error");
+		}
+
+		if (resp.status != RPMI_SUCCESS) {
+			EMSG("RPMI ReqFwd retrieve failed: status=%d", resp.status);
+			panic("RPMI ReqFwd retrieve status error");
+		}
+
+		memcpy(dest + total_received, resp.request_message, resp.returned);
+		total_received += resp.returned;
+	} while (resp.remaining > 0);
+
+	if (total_received != expected_size) {
+		EMSG("REQFWD incomplete message: expected %u bytes, got %u bytes",
+		     expected_size, total_received);
+		panic("REQFWD message size mismatch");
+	}
 }
 
 /* Called with all exception being masked */
