@@ -228,9 +228,10 @@ void pgt_clear_range(struct user_mode_ctx *uctx, vaddr_t begin, vaddr_t end)
 {
 	struct pgt_cache *pgt_cache = &uctx->pgt_cache;
 	struct pgt *p = NULL;
-#ifdef CFG_WITH_LPAE
+#if defined(CFG_WITH_LPAE) && !defined(RV32)
 	uint64_t *tbl = NULL;
 #else
+	/* RV32 forces CFG_WITH_LPAE for a 64-bit paddr_t, yet its PTEs are 32-bit */
 	uint32_t *tbl = NULL;
 #endif
 	unsigned int idx = 0;
@@ -733,9 +734,10 @@ static void clear_ctx_range_from_list(struct pgt_cache *pgt_cache,
 				      void *ctx, vaddr_t begin, vaddr_t end)
 {
 	struct pgt *p = NULL;
-#ifdef CFG_WITH_LPAE
+#if defined(CFG_WITH_LPAE) && !defined(RV32)
 	uint64_t *tbl = NULL;
 #else
+	/* RV32 forces CFG_WITH_LPAE for a 64-bit paddr_t, yet its PTEs are 32-bit */
 	uint32_t *tbl = NULL;
 #endif
 	unsigned int idx = 0;

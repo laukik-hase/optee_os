@@ -58,7 +58,7 @@ struct thread_user_mode_rec {
 	 * 3-12: s2-s11
 	 */
 	unsigned long x[13];
-};
+} __aligned(16); /* pushed on the kernel stack, keep sp 16-byte aligned */
 
 #ifdef CFG_WITH_VFP
 struct thread_vfp_state {
