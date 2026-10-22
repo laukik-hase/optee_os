@@ -5,6 +5,7 @@
 
 #include <asm.S>
 #include <elf_common.h>
+#include <riscv.S>
 
 /*
  * _ldelf_start() - Entry of ldelf
@@ -30,22 +31,22 @@ FUNC _ldelf_start , :
 
 	lla	a1, _ldelf_start	/* Get the load offset */
 
-	/* Loop over the relocations (Elf64_Rela) and process all entries */
+	/* Loop over the relocations (ElfXX_Rela) and process all entries */
 1:
-	ld	t1, 0(a2)	/* t1 = r_offset */
-	ld	t2, 8(a2)	/* t2 = r_info */
-	ld	t3, 16(a2)	/* t3 = r_addend */
-	addi	a2, a2, 24
+	LDR	t1, REGOFF(0)(a2)	/* t1 = r_offset */
+	LDR	t2, REGOFF(1)(a2)	/* t2 = r_info */
+	LDR	t3, REGOFF(2)(a2)	/* t3 = r_addend */
+	addi	a2, a2, REGOFF(3)
 	and	t2, t2, 0xff
 	addi	t4, zero, R_RISCV_RELATIVE
 	bne	t2, t4, 3f
 
 	/* Update the pointer at r_offset + load offset */
 	add	t1, a1, t1
-	ld	t4, 0(t1)
+	LDR	t4, 0(t1)
 	add	t4, t4, t3
 	add	t4, t4, a1
-	sd	t4, 0(t1)
+	STR	t4, 0(t1)
 	ble	a2, a3, 1b
 2:
 	jal	ldelf

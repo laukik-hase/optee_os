@@ -15,6 +15,12 @@ endif
 ifeq ($(ta-target),ta_arm64)
 arch-bits-$(sm) := 64
 endif
+ifeq ($(ta-target),ta_rv32)
+arch-bits-$(sm) := 32
+endif
+ifeq ($(ta-target),ta_rv64)
+arch-bits-$(sm) := 64
+endif
 
 ta-dev-kit-dir$(sm) := $(out-dir)/export-$(ta-target)
 link-out-dir$(sm) := $(out-dir)/$(patsubst %/,%, $(dir $(ta-mk-file)))

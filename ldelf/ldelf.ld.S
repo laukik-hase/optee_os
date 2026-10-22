@@ -12,7 +12,12 @@ OUTPUT_ARCH(arm)
 OUTPUT_FORMAT("elf64-littleaarch64")
 OUTPUT_ARCH(aarch64)
 #endif
+#ifdef RV32
+OUTPUT_FORMAT("elf32-littleriscv")
+OUTPUT_ARCH(riscv)
+#endif
 #ifdef RV64
+OUTPUT_FORMAT("elf64-littleriscv")
 OUTPUT_ARCH(riscv)
 #endif
 

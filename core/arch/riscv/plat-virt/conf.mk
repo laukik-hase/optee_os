@@ -1,8 +1,21 @@
+PLATFORM_FLAVOR ?= rv64
+
+ifeq ($(PLATFORM_FLAVOR),rv64)
 $(call force,CFG_RV64_core,y)
+$(call force,CFG_RISCV_FPU,y)
+supported-ta-targets = ta_rv64
+endif
+
+ifeq ($(PLATFORM_FLAVOR),rv32)
+$(call force,CFG_RV32_core,y)
+$(call force,CFG_RISCV_MMU_MODE,32)
+# Selectable so multilib toolchains without an ilp32d libgcc can build TAs
+CFG_RISCV_FPU ?= y
+supported-ta-targets = ta_rv32
+endif
 
 # ISA extension flags
 $(call force,CFG_RISCV_ISA_C,y)
-$(call force,CFG_RISCV_FPU,y)
 
 $(call force,CFG_CORE_LARGE_PHYS_ADDR,y)
 $(call force,CFG_CORE_RESERVED_SHM,n)
@@ -46,9 +59,6 @@ $(call force,CFG_RISCV_TIME_SOURCE_RDTIME,y)
 CFG_RISCV_MTIME_RATE ?= 10000000
 CFG_RISCV_SBI ?= y
 CFG_RISCV_WITH_M_MODE_SM ?= y
-
-# TA-related flags
-supported-ta-targets = ta_rv64
 
 # Memory layout flags
 CFG_TDDRAM_START ?= 0x8e000000
