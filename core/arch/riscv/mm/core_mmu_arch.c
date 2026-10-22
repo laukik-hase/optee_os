@@ -184,7 +184,8 @@ static unsigned long core_mmu_pgt_to_satp(unsigned long asid,
 					  struct mmu_pgt *pgt)
 {
 	unsigned long satp = 0;
-	unsigned long pgt_ppn = (paddr_t)pgt >> RISCV_PGSHIFT;
+	/* Cast via vaddr_t: GCC sign-extends pointers to wider integers on RV32 */
+	unsigned long pgt_ppn = (paddr_t)(vaddr_t)pgt >> RISCV_PGSHIFT;
 
 	assert(!cpu_mmu_enabled());
 
@@ -469,7 +470,7 @@ static bool core_mmu_entry_copy(struct core_mmu_table_info *tbl_info,
 	memcpy(new_pgt, orig_pgt, sizeof(struct mmu_pgt));
 
 	/* Point to the new table */
-	ptp = core_mmu_ptp_create(pa_to_ppn((paddr_t)new_pgt));
+	ptp = core_mmu_ptp_create(pa_to_ppn((paddr_t)(vaddr_t)new_pgt));
 	core_mmu_entry_set(pte, ptp);
 
 	return true;
@@ -918,6 +919,7 @@ bool core_mmu_entry_to_finer_grained(struct core_mmu_table_info *tbl_info,
 	struct mmu_partition *prtn = core_mmu_get_prtn();
 	unsigned long ptp = 0;
 	paddr_t pgt_pa = 0;
+	unsigned int core = 0;
 
 	if (!core_mmu_level_in_range(tbl_info->level))
 		return false;
@@ -933,10 +935,28 @@ bool core_mmu_entry_to_finer_grained(struct core_mmu_table_info *tbl_info,
 		if (cpu_mmu_enabled())
 			pgt_pa = virt_to_phys(pgt);
 		else
-			pgt_pa = (paddr_t)pgt;
+			pgt_pa = (paddr_t)(vaddr_t)pgt;
 
 		ptp = core_mmu_ptp_create(pa_to_ppn(pgt_pa));
 		core_mmu_entry_set(pte, ptp);
+
+		/*
+		 * The root table is per core and only its user VA slot may
+		 * differ between cores. A new branch for a core mapping must
+		 * therefore show up in every root. On Sv39+ the whole core VA
+		 * range sits under root entries populated at init, but on Sv32
+		 * the root is the page directory level and core regions span
+		 * many root entries that get populated on demand.
+		 */
+		if (tbl_info->level == CORE_MMU_BASE_TABLE_LEVEL &&
+		    (int)idx != user_va_idx) {
+			for (core = 0; core < CFG_TEE_CORE_NB_CORE; core++) {
+				pgt = core_mmu_get_root_pgt_va(prtn, core);
+				core_mmu_entry_set(core_mmu_table_get_entry(pgt,
+									    idx),
+						   ptp);
+			}
+		}
 	}
 
 	return true;
@@ -1075,7 +1095,7 @@ void core_mmu_set_user_map(struct core_mmu_user_map *map)
 	satp &= ~SHIFT_U64(RISCV_SATP_ASID_MASK, RISCV_SATP_ASID_SHIFT);
 	pte = core_mmu_get_user_mapping_entry(prtn);
 	if (map && map->user_map) {
-		ptp = core_mmu_ptp_create(pa_to_ppn((paddr_t)map->user_map));
+		ptp = core_mmu_ptp_create(pa_to_ppn((paddr_t)(vaddr_t)map->user_map));
 		core_mmu_entry_set(pte, ptp);
 		core_mmu_table_write_barrier();
 		satp |= SHIFT_U64(map->asid, RISCV_SATP_ASID_SHIFT);
@@ -1131,7 +1151,25 @@ void core_mmu_create_user_map(struct user_mode_ctx *uctx,
 	core_mmu_get_user_pgdir(&tbl_info);
 	memset(tbl_info.table, 0, RISCV_MMU_PGT_SIZE);
 	core_mmu_populate_user_map(&tbl_info, uctx);
+#ifdef RV32
+	/*
+	 * The user VA range is a single root entry on Sv32, so the thread's
+	 * directory table holds exactly one entry: the leaf table for that
+	 * 4 MiB. Install the leaf table itself in the root slot; the
+	 * directory table would be one level too high there. A context
+	 * without regions yet has no leaf table: install the zeroed
+	 * directory table as an empty leaf table so the mapping still
+	 * counts as active. vm_set_ctx() runs again once regions exist.
+	 */
+	if (core_mmu_entry_is_valid(core_mmu_table_get_entry(tbl_info.table,
+							     0)))
+		map->user_map =
+			pte_to_pa(core_mmu_table_get_entry(tbl_info.table, 0));
+	else
+		map->user_map = virt_to_phys(tbl_info.table);
+#else
 	map->user_map = virt_to_phys(tbl_info.table);
+#endif
 	map->asid = uctx->vm_info.asid;
 }
 
