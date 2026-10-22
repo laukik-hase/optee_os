@@ -26,9 +26,6 @@
 #include <trace.h>
 #include <util.h>
 
-#ifndef RV64
-#error implement
-#endif
 
 #ifndef DEBUG_XLAT_TABLE
 #define DEBUG_XLAT_TABLE 0

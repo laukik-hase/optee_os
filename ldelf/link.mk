@@ -27,6 +27,8 @@ link-ldflags += $(link-ldflags$(sm))
 
 link-ldadd  = $(addprefix -L,$(libdirs))
 link-ldadd += --start-group $(addprefix -l,$(libnames)) --end-group
+# RV32 has no 64-bit div/shift helpers in libutils, pull them from libgcc
+link-ldadd += $(if $(CFG_RV32_$(sm)),$(libgcc$(sm)))
 ldargs-ldelf.elf := $(link-ldflags) $(objs) $(link-ldadd)
 
 link-script-cppflags-$(sm) := \

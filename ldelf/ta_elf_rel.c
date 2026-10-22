@@ -304,7 +304,7 @@ static void e32_process_dyn_rel(const Elf32_Sym *sym_tab, size_t num_syms,
 	*where = val;
 }
 
-static void e32_tls_get_module(const Elf32_Sym *sym_tab, size_t num_syms,
+static void __maybe_unused e32_tls_get_module(const Elf32_Sym *sym_tab, size_t num_syms,
 			       const char *str_tab, size_t str_tab_size,
 			       Elf32_Rel *rel, struct ta_elf **mod)
 {
@@ -325,7 +325,7 @@ static void e32_tls_get_module(const Elf32_Sym *sym_tab, size_t num_syms,
 	resolve_sym(name, NULL, mod, false);
 }
 
-static void e32_tls_resolve(const Elf32_Sym *sym_tab, size_t num_syms,
+static void __maybe_unused e32_tls_resolve(const Elf32_Sym *sym_tab, size_t num_syms,
 			    const char *str_tab, size_t str_tab_size,
 			    Elf32_Rel *rel, vaddr_t *val)
 {
@@ -348,9 +348,14 @@ static void e32_relocate(struct ta_elf *elf, unsigned int rel_sidx)
 	const char *str_tab = NULL;
 	size_t str_tab_size = 0;
 
-	assert(shdr[rel_sidx].sh_type == SHT_REL);
+	/* RISC-V uses RELA; the first two fields match Elf32_Rel */
+	bool rela = shdr[rel_sidx].sh_type == SHT_RELA;
+	size_t ent_size = rela ? sizeof(Elf32_Rela) : sizeof(Elf32_Rel);
 
-	assert(shdr[rel_sidx].sh_entsize == sizeof(Elf32_Rel));
+	assert(shdr[rel_sidx].sh_type == SHT_REL ||
+	       shdr[rel_sidx].sh_type == SHT_RELA);
+
+	assert(shdr[rel_sidx].sh_entsize == ent_size);
 
 	sym_tab_idx = shdr[rel_sidx].sh_link;
 	if (sym_tab_idx) {
@@ -404,13 +409,15 @@ static void e32_relocate(struct ta_elf *elf, unsigned int rel_sidx)
 		err(TEE_ERROR_BAD_FORMAT, ".rel.*/REL out of range");
 	rel = (Elf32_Rel *)(elf->load_addr + shdr[rel_sidx].sh_addr);
 
-	rel_end = rel + shdr[rel_sidx].sh_size / sizeof(Elf32_Rel);
-	for (; rel < rel_end; rel++) {
-		struct ta_elf *mod = NULL;
+	rel_end = (Elf32_Rel *)((vaddr_t)rel +
+				shdr[rel_sidx].sh_size / ent_size * ent_size);
+	for (; rel < rel_end; rel = (Elf32_Rel *)((vaddr_t)rel + ent_size)) {
+		struct ta_elf *mod __maybe_unused = NULL;
 		Elf32_Addr *where = NULL;
 		Elf32_Addr end_offs = 0;
-		size_t sym_idx = 0;
-		vaddr_t val = 0;
+		size_t sym_idx __maybe_unused = 0;
+		vaddr_t val __maybe_unused = 0;
+		Elf32_Sword addend = rela ? ((Elf32_Rela *)rel)->r_addend : 0;
 
 		/* Check the address is inside TA memory */
 		if (ADD_OVERFLOW(rel->r_offset, sizeof(*where), &end_offs) ||
@@ -420,6 +427,7 @@ static void e32_relocate(struct ta_elf *elf, unsigned int rel_sidx)
 		where = (Elf32_Addr *)(elf->load_addr + rel->r_offset);
 
 		switch (ELF32_R_TYPE(rel->r_info)) {
+#if defined(ARM32) || defined(ARM64)
 		case R_ARM_NONE:
 			/*
 			 * One would expect linker prevents such useless entry
@@ -476,6 +484,23 @@ static void e32_relocate(struct ta_elf *elf, unsigned int rel_sidx)
 					str_tab_size, rel, &val);
 			*where = val;
 			break;
+#endif /*ARM32 || ARM64*/
+#if defined(RV32) || defined(RV64)
+		case R_RISCV_NONE:
+			break;
+		case R_RISCV_RELATIVE:
+			*where = elf->load_addr + addend;
+			break;
+		case R_RISCV_32:
+			e32_process_dyn_rel(sym_tab, num_syms, str_tab,
+					    str_tab_size, rel, where);
+			*where += addend;
+			break;
+		case R_RISCV_JUMP_SLOT:
+			e32_process_dyn_rel(sym_tab, num_syms, str_tab,
+					    str_tab_size, rel, where);
+			break;
+#endif /*RV32 || RV64*/
 		default:
 			err(TEE_ERROR_BAD_FORMAT, "Unknown relocation type %d",
 			     ELF32_R_TYPE(rel->r_info));
@@ -748,7 +773,8 @@ void ta_elf_relocate(struct ta_elf *elf)
 		Elf32_Shdr *shdr = elf->shdr;
 
 		for (n = 0; n < elf->e_shnum; n++)
-			if (shdr[n].sh_type == SHT_REL)
+			if (shdr[n].sh_type == SHT_REL ||
+			    shdr[n].sh_type == SHT_RELA)
 				e32_relocate(elf, n);
 	} else {
 		Elf64_Shdr *shdr = elf->shdr;

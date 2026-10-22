@@ -82,6 +82,9 @@
 	.macro __clear_freg reg
 #if RISCV_FLEN_BITS == 32
 		fmv.w.x	f\reg, zero
+#elif __riscv_xlen == 32
+		/* fmv.d.x needs a 64-bit GPR; +0.0 is all-zero bits either way */
+		fcvt.d.w	f\reg, zero
 #else
 		fmv.d.x	f\reg, zero
 #endif

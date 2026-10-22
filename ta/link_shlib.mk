@@ -24,6 +24,13 @@ ifeq ($(sm)-$(CFG_TA_BTI),ta_arm64-y)
 shlink-ldflags += $(call ld-option,-z force-bti) --fatal-warnings
 endif
 shlink-ldflags += --as-needed # Do not add dependency on unused shlib
+# No linker script here, so a multilib toolchain's ld (e.g. a riscv64-
+# prefixed one) would fall back to its default emulation. Name it.
+ifeq ($(sm),ta_rv32)
+shlink-ldflags += -m elf32lriscv
+else ifeq ($(sm),ta_rv64)
+shlink-ldflags += -m elf64lriscv
+endif
 
 shlink-ldadd  = $(LDADD)
 shlink-ldadd += $(addprefix -L,$(libdirs))
