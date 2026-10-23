@@ -49,7 +49,14 @@ void __noreturn __panic_at_abi_return(void)
 /* This function returns current masked exception bits. */
 uint32_t __nostackcheck thread_get_exceptions(void)
 {
-	uint32_t xie = read_csr(CSR_XIE) & THREAD_EXCP_ALL;
+	uint32_t xie = 0;
+
+	/* CLIC: xstatus.IE is the only mask; no native interrupts */
+	if (IS_ENABLED(CFG_RISCV_SMCLIC))
+		return (read_csr(CSR_XSTATUS) & CSR_XSTATUS_IE) ?
+		       0 : THREAD_EXCP_ALL;
+
+	xie = read_csr(CSR_XIE) & THREAD_EXCP_ALL;
 
 	return xie ^ THREAD_EXCP_ALL;
 }
@@ -70,6 +77,18 @@ void __nostackcheck thread_set_exceptions(uint32_t exceptions)
 	 * can mask those exceptions.
 	 */
 	exceptions &= THREAD_EXCP_ALL;
+
+	if (IS_ENABLED(CFG_RISCV_SMCLIC)) {
+		static_assert(THREAD_EXCP_NATIVE_INTR == 0);
+		barrier();
+		if (exceptions)
+			clear_csr(CSR_XSTATUS, CSR_XSTATUS_IE);
+		else
+			set_csr(CSR_XSTATUS, CSR_XSTATUS_IE);
+		barrier();
+		return;
+	}
+
 	exceptions ^= THREAD_EXCP_ALL;
 
 	barrier();
@@ -184,7 +203,9 @@ void thread_native_interrupt_handler(struct thread_ctx_regs *regs,
 {
 	switch (cause & LONG_MAX) {
 	case IRQ_XTIMER:
-		clear_csr(CSR_XIE, CSR_XIE_TIE);
+		/* Unreachable with a CLIC: every interrupt is foreign */
+		if (!IS_ENABLED(CFG_RISCV_SMCLIC))
+			clear_csr(CSR_XIE, CSR_XIE_TIE);
 		break;
 	case IRQ_XSOFT:
 		thread_unhandled_trap(regs, cause);
@@ -202,6 +223,10 @@ unsigned long xstatus_for_xret(uint8_t pie, uint8_t pp)
 	unsigned long xstatus = read_csr(CSR_XSTATUS);
 
 	assert(pp == PRV_M || pp == PRV_S || pp == PRV_U);
+
+	/* CLIC: kernel contexts start masked, like ie = 0 elsewhere */
+	if (IS_ENABLED(CFG_RISCV_SMCLIC) && pp != PRV_U)
+		pie = 0;
 
 #ifdef RV32
 	xstatus = set_field_u32(xstatus, CSR_XSTATUS_IE, 0);
@@ -503,7 +528,12 @@ void thread_init_tvec(void)
 	unsigned long tvec = (unsigned long)get_trap_vect();
 
 	write_csr(CSR_XTVEC, tvec);
-	assert(read_csr(CSR_XTVEC) == tvec);
+	if (IS_ENABLED(CFG_RISCV_SMCLIC)) {
+		/* xtvec[5:0] hold the CLIC mode and read back as hardwired */
+		assert((read_csr(CSR_XTVEC) & ~0x3fUL) == tvec);
+	} else {
+		assert(read_csr(CSR_XTVEC) == tvec);
+	}
 }
 
 void thread_init_per_cpu(void)
@@ -675,8 +705,9 @@ uint32_t thread_enter_user_mode(unsigned long a0, unsigned long a1,
 
 	tee_ta_update_session_utime_resume();
 
-	/* Read current interrupt masks */
-	ie = read_csr(CSR_XIE);
+	/* Read current interrupt masks (no xie with a CLIC) */
+	if (!IS_ENABLED(CFG_RISCV_SMCLIC))
+		ie = read_csr(CSR_XIE);
 
 	/*
 	 * Mask all exceptions, the CSR_XSTATUS.IE will be set from

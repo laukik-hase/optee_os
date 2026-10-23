@@ -10,11 +10,20 @@
 #define DETECT_OP_CSRRW		1
 
 .macro save_and_disable_xie reg
+#ifdef CFG_RISCV_SMCLIC
+	csrrci	\reg, CSR_XSTATUS, CSR_XSTATUS_IE
+	andi	\reg, \reg, CSR_XSTATUS_IE
+#else
 	csrrw	\reg, CSR_XIE, zero
+#endif
 .endm
 
 .macro restore_xie reg
+#ifdef CFG_RISCV_SMCLIC
+	csrs	CSR_XSTATUS, \reg
+#else
 	csrw	CSR_XIE, \reg
+#endif
 .endm
 
 .macro save_and_replace_xtvec reg, label

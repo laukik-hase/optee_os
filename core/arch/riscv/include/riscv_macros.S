@@ -146,3 +146,34 @@
 		j	.
 #endif
 	.endm
+
+/* xie save/restore on traps; no-ops with a CLIC, where xRET restores xstatus.IE */
+	.macro read_xie reg
+#ifdef CFG_RISCV_SMCLIC
+		li	\reg, 0
+#else
+		csrr	\reg, CSR_XIE
+#endif
+	.endm
+
+	.macro write_xie reg
+#ifndef CFG_RISCV_SMCLIC
+		csrw	CSR_XIE, \reg
+#endif
+	.endm
+
+/* Mask before restoring xepc: a CLIC interrupt there would clobber it */
+	.macro mask_intr_before_xret
+#ifdef CFG_RISCV_SMCLIC
+		csrci	CSR_XSTATUS, CSR_XSTATUS_IE
+#endif
+	.endm
+
+/* Mask foreign interrupts outside a trap handler */
+	.macro mask_foreign_intr
+#ifdef CFG_RISCV_SMCLIC
+		csrci	CSR_XSTATUS, CSR_XSTATUS_IE
+#else
+		csrw	CSR_XIE, x0
+#endif
+	.endm

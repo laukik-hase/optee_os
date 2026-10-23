@@ -45,7 +45,7 @@ FUNC thread_std_abi_entry , :
 	mv	s0, a0
 
 	/* Mask all maskable exceptions before switching to temporary stack */
-	csrw	CSR_XIE, x0
+	mask_foreign_intr
 
 	/* Switch to temporary stack */
 	jal	thread_get_tmp_sp
@@ -81,7 +81,7 @@ FUNC thread_rpc_xstatus , :
 	csrr	a2, CSR_XSTATUS
 
 	/* Mask all maskable exceptions before switching to temporary stack */
-	csrw	CSR_XIE, x0
+	mask_foreign_intr
 
 	/* Save return address xSTATUS and pointer to rv */
 	STR	a0, REGOFF(0)(sp)

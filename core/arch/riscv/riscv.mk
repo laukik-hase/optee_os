@@ -133,6 +133,14 @@ endif
 # maintenance in cache_helpers_rv.S. The M-mode firmware must allow them
 # from S-mode (menvcfg.CBCFE and menvcfg.CBIE), which OpenSBI does when
 # the hart advertises the extension.
+# S-mode interrupts are delivered by a CLIC (Smclic) instead of the
+# xie/xip based CLINT scheme. xie is then not implemented, so OP-TEE
+# cannot mask interrupt sources one by one: it keeps xstatus.IE clear
+# while running in S-mode and treats every interrupt taken from user mode
+# as a foreign interrupt, which is returned to the REE to handle. The
+# platform must not use native interrupts.
+CFG_RISCV_SMCLIC ?= n
+
 CFG_RISCV_ISA_ZICBOM ?= n
 ifeq ($(CFG_RISCV_ISA_ZICBOM),y)
 ISA_ZICBOM = _zicbom
