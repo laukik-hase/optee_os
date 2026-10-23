@@ -57,7 +57,56 @@ out:
 	ret
 END_FUNC __get_core_pos
 
-FUNC thread_trap_vect , :
+
+/*
+ * A CLIC raises the in-service interrupt level (xintstatus) when it takes
+ * an interrupt and lowers it again only on an xRET whose xcause is
+ * interrupt-type, from xcause.xPIL. A foreign interrupt is returned to
+ * the REE with an SBI call instead of an xRET, so drop the level here
+ * with an xRET to the next instruction: interrupt-type cause, PIL 0,
+ * previous privilege S, interrupts left disabled. Clobbers t0, t1 and
+ * xepc (already saved in the thread context).
+ */
+.macro clic_drop_intr_level
+#ifdef CFG_RISCV_SMCLIC
+	csrr	t0, CSR_XCAUSE
+	li	t1, 0x00ff0000		/* xcause.xPIL */
+	not	t1, t1
+	and	t0, t0, t1
+	li	t1, CSR_XCAUSE_INTR_FLAG
+	or	t0, t0, t1
+	csrw	CSR_XCAUSE, t0
+	li	t0, CSR_XSTATUS_SPP
+	csrs	CSR_XSTATUS, t0
+	li	t0, CSR_XSTATUS_PIE
+	csrc	CSR_XSTATUS, t0
+	la	t0, 1f
+	csrw	CSR_XEPC, t0
+	XRET
+1:
+#endif
+.endm
+
+/*
+ * Read xcause. With CFG_RISCV_SMCLIC the CLIC keeps state (previous
+ * interrupt level, previous privilege) in bits [30:12]; drop it so the
+ * value is a standard interrupt flag + cause code.
+ */
+.macro read_xcause reg, scratch
+	csrr	\reg, CSR_XCAUSE
+#ifdef CFG_RISCV_SMCLIC
+	li	\scratch, CSR_XCAUSE_INTR_FLAG | 0xfff
+	and	\reg, \reg, \scratch
+#endif
+.endm
+
+#ifdef CFG_RISCV_SMCLIC
+/* A CLIC hardwires xtvec[5:0]: the vector must be 64-byte aligned */
+#define TRAP_VECT_ALIGN	64
+#else
+#define TRAP_VECT_ALIGN	4
+#endif
+FUNC thread_trap_vect , :, default, TRAP_VECT_ALIGN
 	csrrw	tp, CSR_XSCRATCH, tp
 	bnez	tp, 0f
 	/* Read tp back */
@@ -74,7 +123,7 @@ LOCAL_FUNC trap_from_kernel, :
 	store_xregs tp, THREAD_CORE_LOCAL_X0, REG_SP
 	store_xregs tp, THREAD_CORE_LOCAL_X1, REG_A0, REG_A1
 
-	csrr	a0, CSR_XCAUSE
+	read_xcause a0, a1
 	/* MSB of cause differentiates between interrupts and exceptions */
 	bge	a0, zero, exception_from_kernel
 
@@ -98,10 +147,10 @@ interrupt_from_kernel:
 	store_xregs sp, THREAD_CTX_REG_S2, REG_S2, REG_S11
 	store_xregs sp, THREAD_CTX_REG_T3, REG_T3, REG_T6
 	/* Save XIE */
-	csrr	t0, CSR_XIE
+	read_xie t0
 	store_xregs sp, THREAD_CTX_REG_IE, REG_T0
 	/* Mask all interrupts */
-	csrw	CSR_XIE, x0
+	write_xie zero
 	/* Save XSTATUS */
 	csrr	t0, CSR_XSTATUS
 	store_xregs sp, THREAD_CTX_REG_STATUS, REG_T0
@@ -114,7 +163,7 @@ interrupt_from_kernel:
 	 * a1 = cause
 	 */
 	mv	a0, sp
-	csrr	a1, CSR_XCAUSE
+	read_xcause a1, a2
 	/* Load tmp_stack_va_end as current sp. */
 	load_xregs tp, THREAD_CORE_LOCAL_TMP_STACK_VA_END, REG_SP
 
@@ -123,6 +172,10 @@ interrupt_from_kernel:
 	 * value of XCAUSE is 0x8000000000000005 (supervisor timer interrupt),
 	 * we build 0x20, which is (1 << 5) and indicates the sip.STIP signal.
 	 */
+#ifdef CFG_RISCV_SMCLIC
+	/* CLIC causes don't map to xip bits; every interrupt is foreign */
+	j	foreign_interrupt_from_kernel
+#endif
 	li	a2, CSR_XCAUSE_INTR_FLAG
 	sub	a2, a1, a2
 	li	a3, 1
@@ -136,6 +189,7 @@ interrupt_from_kernel:
 	beqz	a2, native_interrupt_from_kernel
 
 foreign_interrupt_from_kernel:
+	clic_drop_intr_level
 	/*
 	 * a0 = struct thread_ctx_regs *regs
 	 * Tail call thread_foreign_interrupt_handler(regs) since we will not
@@ -172,7 +226,7 @@ native_interrupt_from_kernel:
 	write_xstatus_keep_fs t0, t1
 	/* Restore XIE */
 	load_xregs sp, THREAD_CTX_REG_IE, REG_T0
-	csrw	CSR_XIE, t0
+	write_xie t0
 	/* We are going to XRET to kernel mode. Set XSCRATCH as 0 */
 	csrw	CSR_XSCRATCH, 0
 	/* Restore all GPRs */
@@ -233,10 +287,10 @@ set_sp:
 	store_xregs sp, THREAD_ABT_REG_S2, REG_S2, REG_S11
 	store_xregs sp, THREAD_ABT_REG_T3, REG_T3, REG_T6
 	/* Save XIE */
-	csrr	t0, CSR_XIE
+	read_xie t0
 	store_xregs sp, THREAD_ABT_REG_IE, REG_T0
 	/* Mask all interrupts */
-	csrw	CSR_XIE, x0
+	write_xie zero
 	/* Save XSTATUS */
 	csrr	t0, CSR_XSTATUS
 	store_xregs sp, THREAD_ABT_REG_STATUS, REG_T0
@@ -247,7 +301,7 @@ set_sp:
 	csrr	t0, CSR_XTVAL
 	store_xregs sp, THREAD_ABT_REG_TVAL, REG_T0
 	/* Save XCAUSE */
-	csrr	a0, CSR_XCAUSE
+	read_xcause a0, t0
 	store_xregs sp, THREAD_ABT_REG_CAUSE, REG_A0
 
 	/*
@@ -270,7 +324,7 @@ set_sp:
 	write_xstatus_keep_fs t0, t1
 	/* Restore XIE */
 	load_xregs sp, THREAD_ABT_REG_IE, REG_T0
-	csrw	CSR_XIE, t0
+	write_xie t0
 	/* We are going to XRET to kernel mode. Set XSCRATCH as 0 */
 	csrw	CSR_XSCRATCH, 0
 
@@ -297,7 +351,7 @@ LOCAL_FUNC trap_from_user, :
 	store_xregs tp, THREAD_CORE_LOCAL_X0, REG_SP
 	store_xregs tp, THREAD_CORE_LOCAL_X1, REG_A0, REG_A1
 
-	csrr	a0, CSR_XCAUSE
+	read_xcause a0, a1
 	/* MSB of cause differentiates between interrupts and exceptions */
 	bge	a0, zero, exception_from_user
 
@@ -335,10 +389,10 @@ interrupt_from_user:
 	store_xregs sp, THREAD_CTX_REG_S2, REG_S2, REG_S11
 	store_xregs sp, THREAD_CTX_REG_T3, REG_T3, REG_T6
 	/* Save XIE */
-	csrr	t0, CSR_XIE
+	read_xie t0
 	store_xregs sp, THREAD_CTX_REG_IE, REG_T0
 	/* Mask all interrupts */
-	csrw	CSR_XIE, x0
+	write_xie zero
 	/* Save XSTATUS */
 	csrr	t0, CSR_XSTATUS
 	store_xregs sp, THREAD_CTX_REG_STATUS, REG_T0
@@ -351,7 +405,7 @@ interrupt_from_user:
 	 * a1 = cause
 	 */
 	mv	a0, sp
-	csrr	a1, CSR_XCAUSE
+	read_xcause a1, a2
 	/* Load tmp_stack_va_end as current sp. */
 	load_xregs tp, THREAD_CORE_LOCAL_TMP_STACK_VA_END, REG_SP
 
@@ -360,6 +414,10 @@ interrupt_from_user:
 	 * value of XCAUSE is 0x8000000000000005 (supervisor timer interrupt),
 	 * we build 0x20, which is (1 << 5) and indicates the sip.STIP signal.
 	 */
+#ifdef CFG_RISCV_SMCLIC
+	/* CLIC causes don't map to xip bits; every interrupt is foreign */
+	j	foreign_interrupt_from_user
+#endif
 	li	a2, CSR_XCAUSE_INTR_FLAG
 	sub	a2, a1, a2
 	li	a3, 1
@@ -373,6 +431,7 @@ interrupt_from_user:
 	beqz	a2, native_interrupt_from_user
 
 foreign_interrupt_from_user:
+	clic_drop_intr_level
 	/*
 	 * a0 = struct thread_ctx_regs *regs
 	 * Tail call thread_foreign_interrupt_handler(regs) since we will not
@@ -409,7 +468,7 @@ native_interrupt_from_user:
 	write_xstatus_keep_fs t0, t1
 	/* Restore XIE */
 	load_xregs sp, THREAD_CTX_REG_IE, REG_T0
-	csrw	CSR_XIE, t0
+	write_xie t0
 	/* Set scratch as thread_core_local */
 	csrw	CSR_XSCRATCH, tp
 	/* Restore all GPRs */
@@ -463,10 +522,10 @@ ecall_from_user:
 	store_xregs sp, THREAD_SCALL_REG_A0, REG_A0, REG_A7
 	store_xregs sp, THREAD_SCALL_REG_T3, REG_T3, REG_T6
 	/* Save XIE */
-	csrr	a0, CSR_XIE
+	read_xie a0
 	store_xregs sp, THREAD_SCALL_REG_IE, REG_A0
 	/* Mask all interrupts */
-	csrw	CSR_XIE, zero
+	write_xie zero
 	/* Save XSTATUS */
 	csrr	a0, CSR_XSTATUS
 	store_xregs sp, THREAD_SCALL_REG_STATUS, REG_A0
@@ -499,7 +558,7 @@ ecall_from_user:
 	write_xstatus_keep_fs t0, t1
 	/* Restore XIE */
 	load_xregs sp, THREAD_SCALL_REG_IE, REG_T0
-	csrw	CSR_XIE, t0
+	write_xie t0
 	/* Check previous privilege mode by status.SPP */
 	csrr	t0, CSR_XSTATUS
 	b_if_prev_priv_is_u t0, 1f
@@ -576,10 +635,10 @@ abort_from_user:
 	store_xregs sp, THREAD_ABT_REG_S2, REG_S2, REG_S11
 	store_xregs sp, THREAD_ABT_REG_T3, REG_T3, REG_T6
 	/* Save XIE */
-	csrr	t0, CSR_XIE
+	read_xie t0
 	store_xregs sp, THREAD_ABT_REG_IE, REG_T0
 	/* Mask all interrupts */
-	csrw	CSR_XIE, x0
+	write_xie zero
 	/* Save XSTATUS */
 	csrr	t0, CSR_XSTATUS
 	store_xregs sp, THREAD_ABT_REG_STATUS, REG_T0
@@ -590,7 +649,7 @@ abort_from_user:
 	csrr	t0, CSR_XTVAL
 	store_xregs sp, THREAD_ABT_REG_TVAL, REG_T0
 	/* Save XCAUSE */
-	csrr	a0, CSR_XCAUSE
+	read_xcause a0, t0
 	store_xregs sp, THREAD_ABT_REG_CAUSE, REG_A0
 
 	/*
@@ -613,7 +672,7 @@ abort_from_user:
 	write_xstatus_keep_fs t0, t1
 	/* Restore XIE */
 	load_xregs sp, THREAD_ABT_REG_IE, REG_T0
-	csrw	CSR_XIE, t0
+	write_xie t0
 
 	/* Update core local flags */
 	lw	a0, THREAD_CORE_LOCAL_FLAGS(tp)
@@ -717,7 +776,7 @@ FUNC __thread_enter_user_mode , :
 	write_xstatus_keep_fs s0, t1
 	/* Set user ie */
 	load_xregs sp, THREAD_CTX_REG_IE, REG_S0
-	csrw	CSR_XIE, s0
+	write_xie s0
 	/* Load the rest of the general purpose registers */
 	load_xregs sp, THREAD_CTX_REG_RA, REG_RA
 	load_xregs sp, THREAD_CTX_REG_GP, REG_GP
@@ -746,7 +805,7 @@ FUNC thread_resume , :
 	write_xstatus_keep_fs t0, t1
 	/* Restore ie */
 	load_xregs sp, THREAD_CTX_REG_IE, REG_T0
-	csrw	CSR_XIE, t0
+	write_xie t0
 
 	/* Check if previous privilege mode by status.SPP */
 	csrr	t0, CSR_XSTATUS

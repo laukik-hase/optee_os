@@ -36,6 +36,7 @@ CFG_BOOT_SYNC_CPU ?= n
 
 # Interrupt controller: CLIC, no PLIC/APLIC/IMSIC. OP-TEE takes no
 # external interrupts in the trusted domain, so no driver is needed.
+$(call force,CFG_RISCV_SMCLIC,y)
 $(call force,CFG_RISCV_PLIC,n)
 $(call force,CFG_RISCV_APLIC,n)
 $(call force,CFG_RISCV_APLIC_MSI,n)
