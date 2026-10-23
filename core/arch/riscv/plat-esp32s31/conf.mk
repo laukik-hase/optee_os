@@ -37,6 +37,10 @@ CFG_BOOT_SYNC_CPU ?= n
 # Interrupt controller: CLIC, no PLIC/APLIC/IMSIC. OP-TEE takes no
 # external interrupts in the trusted domain, so no driver is needed.
 $(call force,CFG_RISCV_SMCLIC,y)
+
+# FENCE.I does not write back the D-cache: maintain the caches through
+# the OpenSBI ESP32-S31 vendor extension (see main.c)
+$(call force,CFG_RISCV_PLAT_CACHE_OPS,y)
 $(call force,CFG_RISCV_PLIC,n)
 $(call force,CFG_RISCV_APLIC,n)
 $(call force,CFG_RISCV_APLIC_MSI,n)

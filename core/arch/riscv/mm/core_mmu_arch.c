@@ -737,6 +737,9 @@ static void icache_inv_remote(void)
 
 TEE_Result cache_op_inner(enum cache_op op, void *va, size_t len)
 {
+	if (IS_ENABLED(CFG_RISCV_PLAT_CACHE_OPS))
+		return plat_cache_op_inner(op, va, len);
+
 	switch (op) {
 	case DCACHE_CLEAN:
 		dcache_op_all(DCACHE_OP_CLEAN);

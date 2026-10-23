@@ -141,6 +141,10 @@ endif
 # platform must not use native interrupts.
 CFG_RISCV_SMCLIC ?= n
 
+# The platform provides plat_cache_op_inner() for all cache maintenance
+# (I-cache/D-cache not kept coherent by FENCE.I, no Zicbom in S-mode).
+CFG_RISCV_PLAT_CACHE_OPS ?= n
+
 CFG_RISCV_ISA_ZICBOM ?= n
 ifeq ($(CFG_RISCV_ISA_ZICBOM),y)
 ISA_ZICBOM = _zicbom

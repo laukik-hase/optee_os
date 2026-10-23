@@ -189,6 +189,14 @@ static inline void core_mmu_table_write_barrier(void)
 
 TEE_Result cache_op_inner(enum cache_op op, void *va, size_t len);
 
+/*
+ * Platform cache maintenance, used by cache_op_inner() instead of the
+ * fence/FENCE.I/Zicbom helpers when CFG_RISCV_PLAT_CACHE_OPS=y. For SoCs
+ * whose caches are only maintainable from M-mode (e.g. through an SBI
+ * vendor extension).
+ */
+TEE_Result plat_cache_op_inner(enum cache_op op, void *va, size_t len);
+
 static inline TEE_Result cache_op_outer(enum cache_op op __unused,
 					paddr_t pa __unused,
 					size_t len __unused)
