@@ -17,9 +17,13 @@ $(call force,CFG_CORE_DYN_SHM,y)
 # The dispatcher DT (cpus, rpmi-reqfwd/rpmi-tee nodes) arrives in a1
 CFG_DT ?= y
 
-# Crypto: no Zkr on this core, the hardware RNG peripheral comes later
-$(call force,CFG_WITH_SOFTWARE_PRNG,y)
+# Crypto: the TRNG peripheral is the RNG (no Zkr on this core), also
+# exported to Linux through the RNG PTA
+$(call force,CFG_WITH_SOFTWARE_PRNG,n)
 $(call force,CFG_RISCV_ZKR_RNG,n)
+$(call force,CFG_ESP32S31_TRNG,y)
+$(call force,CFG_HWRNG_PTA,y)
+CFG_HWRNG_QUALITY ?= 1024
 
 # Protection flags
 $(call force,CFG_CORE_ASLR,n)

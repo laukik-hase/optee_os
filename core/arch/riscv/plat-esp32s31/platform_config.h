@@ -17,6 +17,10 @@
 #define DRAM_SIZE		0x01000000
 #endif
 
+/* TRNG and its LP peripheral clock/reset control */
+#define ESP32S31_TRNG_BASE		0x20814000
+#define ESP32S31_LP_PERICLKRST_BASE	0x20710000
+
 #ifdef CFG_RISCV_MTIME_RATE
 #define RISCV_MTIME_RATE CFG_RISCV_MTIME_RATE
 #else
