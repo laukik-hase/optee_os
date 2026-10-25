@@ -28,6 +28,8 @@ CFG_HWRNG_QUALITY ?= 1024
 # SHA accelerator for SHA-1/224/256/384/512, other hashes stay in software
 CFG_ESP32S31_CRYPTO_DRIVER ?= y
 CFG_ESP32S31_SHA ?= y
+# AES accelerator for AES-ECB/CBC/CTR, other modes stay in software
+CFG_ESP32S31_AES ?= y
 
 # Protection flags
 $(call force,CFG_CORE_ASLR,n)

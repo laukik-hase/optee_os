@@ -21,7 +21,8 @@
 #define ESP32S31_TRNG_BASE		0x20814000
 #define ESP32S31_LP_PERICLKRST_BASE	0x20710000
 
-/* SHA accelerator and the HP crypto clock/reset control */
+/* AES and SHA accelerators and the HP crypto clock/reset control */
+#define ESP32S31_AES_BASE		0x20508000
 #define ESP32S31_SHA_BASE		0x20509000
 #define ESP32S31_HP_SYS_CLKRST_BASE	0x20587000
 

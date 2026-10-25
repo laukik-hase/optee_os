@@ -76,6 +76,14 @@ static TEE_Result esp32s31_crypto_init(void)
 		}
 	}
 
+	if (IS_ENABLED(CFG_ESP32S31_AES)) {
+		res = esp32s31_aes_register();
+		if (res) {
+			EMSG("AES registration failed: %#"PRIx32, res);
+			return res;
+		}
+	}
+
 	return TEE_SUCCESS;
 }
 
