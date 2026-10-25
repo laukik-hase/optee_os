@@ -25,6 +25,10 @@ $(call force,CFG_ESP32S31_TRNG,y)
 $(call force,CFG_HWRNG_PTA,y)
 CFG_HWRNG_QUALITY ?= 1024
 
+# SHA accelerator for SHA-1/224/256/384/512, other hashes stay in software
+CFG_ESP32S31_CRYPTO_DRIVER ?= y
+CFG_ESP32S31_SHA ?= y
+
 # Protection flags
 $(call force,CFG_CORE_ASLR,n)
 $(call force,CFG_CORE_SANITIZE_KADDRESS,n)
